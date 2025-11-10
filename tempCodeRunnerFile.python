@@ -1,0 +1,104 @@
+# -*- coding: utf-8 -*-
+"""
+Step-by-step CNN simulation with filter application, max pooling, flattening, and feedforward NN. 
+Each step is exported to Excel showing intermediate table results.
+"""
+
+import numpy as np
+import pandas as pd
+
+# Step 1: Original 12x12 matrix (input image)
+image = np.array([
+    [46,30,57,45,27,12,16,25,20,39,17,52],
+    [57,21,10,16,29,25,541,19,3,18,2,5],
+    [50,40,5,31,36,16,51,5,58,18,56,58],
+    [26,43,15,14,36,10,32,37,5,38,518,21],
+    [13,17,59,17,0,29,31,34,31,24,316,31],
+    [40,314,16,330,19,22,342,27,30,16,6,24],
+    [45,45,45,45,45,35,24,36,17,17,14,30],
+    [41,45,45,45,45,26,15,37,23,11,50,29],
+    [14,18,2,39,16,14,46,36,15,48,37,23],
+    [45,45,45,45,45,45,8,45,34,36,25,34],
+    [31,45,23,50,28,39,32,43,35,44,38,33],
+    [34,21,37,32,33,36,35,34,36,31,40,18]
+])
+# Convert image to DataFrame for Excel export
+df_image = pd.DataFrame(image)
+
+# Step 2: Define or generate three 3x3 filters
+np.random.seed(0)
+filters = [np.random.randint(-2, 3, (3, 3)) for _ in range(3)]
+dfs_filters = [pd.DataFrame(f) for f in filters]  # For Excel export
+
+# Step 3: Convolution
+def convolve2d(img, kernel):
+    k = kernel.shape[0]
+    out_dim = img.shape[0] - k + 1
+    result = np.zeros((out_dim, out_dim))
+    for i in range(out_dim):
+        for j in range(out_dim):
+            region = img[i:i+k, j:j+k]
+            result[i, j] = np.sum(region * kernel)
+    return result
+
+feature_maps = [convolve2d(image, f) for f in filters]
+dfs_feature_maps = [pd.DataFrame(fm) for fm in feature_maps]  # For Excel
+
+# Step 4: Max-Pooling (2x2, stride 2)
+def max_pooling(feature_map, size=2, stride=2):
+    pooled_h = (feature_map.shape[0] - size)//stride + 1
+    pooled_w = (feature_map.shape[1] - size)//stride + 1
+    pooled = np.zeros((pooled_h, pooled_w))
+    for i in range(0, feature_map.shape[0]-size+1, stride):
+        for j in range(0, feature_map.shape[1]-size+1, stride):
+            pooled[i//stride, j//stride] = np.max(feature_map[i:i+size, j:j+size])
+    return pooled
+
+pooled_maps = [max_pooling(fm) for fm in feature_maps]
+dfs_pooled_maps = [pd.DataFrame(pm) for pm in pooled_maps]  # For Excel
+
+# Step 5: Flattening
+flattened = np.concatenate([pm.flatten() for pm in pooled_maps])
+df_flattened = pd.DataFrame(flattened, columns=["FlatVector"])  # For Excel
+
+# Step 6: Neural Network
+input_neurons = flattened.size
+hidden_neurons = 8   # Can be changed by user as needed
+output_neurons = 1   # Binary classification
+
+np.random.seed(1)
+W1 = np.random.randn(hidden_neurons, input_neurons)
+b1 = np.random.randn(hidden_neurons, 1)
+W2 = np.random.randn(output_neurons, hidden_neurons)
+b2 = np.random.randn(output_neurons, 1)
+
+def relu(x):
+    return np.maximum(0, x)
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+X = flattened.reshape(-1, 1)  # Column vector
+Z1 = np.dot(W1, X) + b1
+A1 = relu(Z1)
+Z2 = np.dot(W2, A1) + b2
+A2 = sigmoid(Z2)
+
+# Export Hidden Layer and Output Layer
+df_hidden = pd.DataFrame(A1, columns=['HiddenLayer(ReLU)'])
+df_output = pd.DataFrame(A2, columns=['Output(Sigmoid)'])
+
+# Step 7: Export to Excel
+with pd.ExcelWriter('cnn_steps_output.xlsx') as writer:
+    df_image.to_excel(writer, index=False, header=False, sheet_name='Original_Image')
+    for idx, df_filt in enumerate(dfs_filters):
+        df_filt.to_excel(writer, index=False, header=False, sheet_name=f'Filter_{idx+1}')
+    for idx, df_fm in enumerate(dfs_feature_maps):
+        df_fm.to_excel(writer, index=False, header=False, sheet_name=f'FeatureMap_{idx+1}')
+    for idx, df_pm in enumerate(dfs_pooled_maps):
+        df_pm.to_excel(writer, index=False, header=False, sheet_name=f'PooledMap_{idx+1}')
+    df_flattened.to_excel(writer, index=False, sheet_name='Flattened')
+    df_hidden.to_excel(writer, index=False, sheet_name='HiddenLayer')
+    df_output.to_excel(writer, index=False, sheet_name='Output')
+
+print("All steps exported to cnn_steps_output.xlsx.")

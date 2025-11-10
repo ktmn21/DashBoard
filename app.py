@@ -90,30 +90,32 @@ def main():
             st.rerun()
         
         st.sidebar.title("DAA Algorithms")
-        algorithm = st.sidebar.radio(
-            "Select Algorithm:",
-            ["Knapsack Problem", "Coin Change (DP)", "Huffman Coding", 
-             "Travelling Salesman Problem", "Genetic Algorithm", "Branch and Bound"]
+        main_section = st.sidebar.radio(
+            "Select Section:",
+            ["DP (Dynamic Programming)", "Huffman Coding", "Genetic Algorithm"]
         )
         
-        if algorithm == "Knapsack Problem":
-            from daa.knapsack import show_knapsack
-            show_knapsack()
-        elif algorithm == "Coin Change (DP)":
-            from daa.dp_coin_change import show_coin_change
-            show_coin_change()
-        elif algorithm == "Huffman Coding":
+        if main_section == "DP (Dynamic Programming)":
+            dp_algorithm = st.sidebar.radio(
+                "Select DP Algorithm:",
+                ["TSP (Traveling Salesman Problem)", "Coin Changing", "Knapsack"]
+            )
+            
+            if dp_algorithm == "TSP (Traveling Salesman Problem)":
+                from daa.tsp_bb import show_tsp_bb
+                show_tsp_bb()
+            elif dp_algorithm == "Coin Changing":
+                from daa.dp_coin_change import show_coin_change
+                show_coin_change()
+            elif dp_algorithm == "Knapsack":
+                from daa.knapsack import show_knapsack
+                show_knapsack()
+        elif main_section == "Huffman Coding":
             from daa.huffman import show_huffman
             show_huffman()
-        elif algorithm == "Travelling Salesman Problem":
-            from daa.tsp import show_tsp
-            show_tsp()
-        elif algorithm == "Genetic Algorithm":
+        elif main_section == "Genetic Algorithm":
             from daa.genetic import show_genetic
             show_genetic()
-        elif algorithm == "Branch and Bound":
-            from daa.branch_bound import show_branch_bound
-            show_branch_bound()
     
     # DIP Page
     elif st.session_state.page == 'dip':
