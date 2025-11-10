@@ -254,15 +254,23 @@ def show_knapsack():
             
             # Highlight current cell
             if current_cell:
-                table_plot[(current_cell[0] + 1, current_cell[1] + 1)].set_facecolor('#ffff00')
-                table_plot[(current_cell[0] + 1, current_cell[1] + 1)].set_text_props(weight='bold')
+                cell_row = current_cell[0] + 1
+                cell_col = current_cell[1] + 1
+                # Check if the cell exists in the table (bounds checking)
+                if (cell_row, cell_col) in table_plot._cells:
+                    table_plot[(cell_row, cell_col)].set_facecolor('#ffff00')
+                    table_plot[(cell_row, cell_col)].set_text_props(weight='bold')
             
             # Color updated cells
             for step in steps_to_show:
                 if step['action'] != 'Initialize':
                     i_idx = step['i']
                     k_idx = step['k']
-                    table_plot[(i_idx + 1, k_idx + 1)].set_facecolor('#90EE90')
+                    cell_row = i_idx + 1
+                    cell_col = k_idx + 1
+                    # Check if the cell exists in the table (bounds checking)
+                    if (cell_row, cell_col) in table_plot._cells:
+                        table_plot[(cell_row, cell_col)].set_facecolor('#90EE90')
             
             ax.axis('off')
             ax.set_title('DP Table: V[i, k] = maximum value with first i items and capacity k', 

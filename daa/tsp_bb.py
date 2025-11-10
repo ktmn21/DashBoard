@@ -70,30 +70,42 @@ class TSPNode:
         self.pruned = False
 
 def tsp_branch_bound(cities, cost_matrix):
-    """Solve TSP using Branch and Bound"""
+    """Solve TSP using Branch and Bound with step visualization"""
     n = len(cities)
     nodes_explored = []
     best_cost = float('inf')
     best_path = None
+    step = 1
     
     # Initialize root node
     initial_matrix = cost_matrix.copy()
-    initial_bound = calculate_bound(initial_matrix, [])
+    st.write("# Branch and Bound Steps")
+    
+    # Root node reduction
+    st.write("## Root Node")
+    initial_bound = show_node_reductions(initial_matrix, [], step)
     root = TSPNode(0, [0], initial_bound, initial_matrix)
     
     queue = deque([root])
-    step = 0
+    nodes_explored.append(root)
+    
+    # Show initial tree
+    st.write(f"### Tree after Step {step}")
+    tree_fig = visualize_tsp_tree(nodes_explored)
+    st.pyplot(tree_fig)
     
     while queue:
         current = queue.popleft()
-        nodes_explored.append(current)
+        step += 1
         
         if current.bound >= best_cost:
             current.pruned = True
+            st.write(f"## Step {step}: Pruning node with path {current.path}")
+            st.write(f"Bound ({current.bound:.2f}) ≥ Best cost ({best_cost:.2f})")
             continue
         
         if current.level == n - 1:
-            # Complete path
+            # Complete path found
             total_cost = sum(cost_matrix[current.path[i]][current.path[i+1]] 
                            for i in range(len(current.path) - 1))
             total_cost += cost_matrix[current.path[-1]][current.path[0]]
@@ -101,25 +113,33 @@ def tsp_branch_bound(cities, cost_matrix):
             if total_cost < best_cost:
                 best_cost = total_cost
                 best_path = current.path + [current.path[0]]
+                st.write(f"## Step {step}: New best solution found!")
+                st.write(f"Path: {best_path}")
+                st.write(f"Cost: {best_cost:.2f}")
             continue
         
         # Generate children
+        st.write(f"## Step {step}: Expanding node with path {current.path}")
         for next_city in range(n):
             if next_city not in current.path:
                 new_path = current.path + [next_city]
                 new_matrix = current.cost_matrix.copy()
                 
-                # Set appropriate entries to infinity
-                if len(current.path) > 0:
-                    new_matrix[current.path[-1], :] = np.inf
-                    new_matrix[:, next_city] = np.inf
-                    new_matrix[next_city, current.path[0]] = np.inf
-                
-                new_bound = current.bound + calculate_bound(new_matrix, new_path)
+                # Show matrix reductions for this node
+                new_bound = current.bound + show_node_reductions(new_matrix, new_path, step)
                 
                 if new_bound < best_cost:
                     child = TSPNode(current.level + 1, new_path, new_bound, new_matrix)
                     queue.append(child)
+                    nodes_explored.append(child)
+                    st.write(f"Added node with path {new_path} and bound {new_bound:.2f}")
+                else:
+                    st.write(f"Pruned node with path {new_path} (bound {new_bound:.2f} ≥ {best_cost:.2f})")
+        
+        # Show updated tree
+        st.write(f"### Tree after Step {step}")
+        tree_fig = visualize_tsp_tree(nodes_explored)
+        st.pyplot(tree_fig)
     
     return best_path, best_cost, nodes_explored
 
@@ -184,130 +204,266 @@ def visualize_tsp_path(cities, path, cost, title="TSP Solution"):
     
     return fig
 
+def parse_edge_input(input_str):
+    """Parse edge input string into list of (destination, weight) tuples"""
+    if not input_str.strip():
+        return []
+    edges = []
+    pairs = input_str.strip().split()
+    for pair in pairs:
+        if not pair.startswith('(') or not pair.endswith(')'):
+            continue
+        try:
+            dest, weight = pair[1:-1].split(',')
+            edges.append((int(dest), float(weight)))
+        except:
+            continue
+    return edges
+
+def create_cost_matrix(n, edge_inputs, directed=False):
+    """Create cost matrix from edge inputs"""
+    matrix = np.full((n, n), np.inf)
+    np.fill_diagonal(matrix, 0)
+    
+    for i in range(n):
+        edges = edge_inputs[i]
+        for dest, weight in edges:
+            if dest-1 != i:  # Skip self-loops
+                matrix[i][dest-1] = weight
+                if not directed:  # For undirected graphs
+                    matrix[dest-1][i] = weight
+    return matrix
+
+def show_reduction_step(matrix, step_type, reduction_values):
+    """Show matrix reduction step"""
+    df = pd.DataFrame(matrix)
+    df = df.replace(np.inf, '∞')
+    
+    if step_type == "row":
+        st.write("Row Reduction:")
+        for i, val in enumerate(reduction_values):
+            if val > 0:
+                st.write(f"Row {i+1}: subtract {val:.2f}")
+    else:
+        st.write("Column Reduction:")
+        for i, val in enumerate(reduction_values):
+            if val > 0:
+                st.write(f"Column {i+1}: subtract {val:.2f}")
+    
+    st.dataframe(df)
+    return df
+
+# Add new function to show matrix reductions for each node
+def show_node_reductions(matrix, current_path, step_number):
+    """Show row and column reductions for current node"""
+    st.write(f"### Step {step_number}: Node with Path {current_path}")
+    
+    # Copy matrix and set visited paths to infinity
+    temp_matrix = matrix.copy()
+    if len(current_path) > 0:
+        for i in range(len(current_path) - 1):
+            temp_matrix[current_path[i], :] = np.inf
+            temp_matrix[:, current_path[i+1]] = np.inf
+        if len(current_path) > 1:
+            temp_matrix[current_path[-1], current_path[0]] = np.inf
+    
+    # Show initial matrix
+    st.write("Initial Matrix:")
+    initial_df = pd.DataFrame(temp_matrix)
+    initial_df = initial_df.replace(np.inf, '∞')
+    st.dataframe(initial_df)
+    
+    # Row reduction
+    row_reductions = []
+    for i in range(len(matrix)):
+        row = temp_matrix[i]
+        valid_values = row[row != np.inf]
+        if len(valid_values) > 0:
+            row_min = np.min(valid_values)
+            if row_min != np.inf and row_min > 0:
+                temp_matrix[i] = np.where(temp_matrix[i] != np.inf, 
+                                        temp_matrix[i] - row_min, np.inf)
+                row_reductions.append((i, row_min))
+    
+    if row_reductions:
+        st.write("After Row Reduction:")
+        for i, red in row_reductions:
+            st.write(f"Row {i+1}: subtract {red:.2f}")
+        row_df = pd.DataFrame(temp_matrix)
+        row_df = row_df.replace(np.inf, '∞')
+        st.dataframe(row_df)
+    
+    # Column reduction
+    col_reductions = []
+    for j in range(len(matrix)):
+        col = temp_matrix[:, j]
+        valid_values = col[col != np.inf]
+        if len(valid_values) > 0:
+            col_min = np.min(valid_values)
+            if col_min != np.inf and col_min > 0:
+                temp_matrix[:, j] = np.where(temp_matrix[:, j] != np.inf, 
+                                           temp_matrix[:, j] - col_min, np.inf)
+                col_reductions.append((j, col_min))
+    
+    if col_reductions:
+        st.write("After Column Reduction:")
+        for j, red in col_reductions:
+            st.write(f"Column {j+1}: subtract {red:.2f}")
+        final_df = pd.DataFrame(temp_matrix)
+        final_df = final_df.replace(np.inf, '∞')
+        st.dataframe(final_df)
+    
+    total_reduction = sum(r for _, r in row_reductions) + sum(r for _, r in col_reductions)
+    st.write(f"Total Reduction Cost: {total_reduction:.2f}")
+    return total_reduction
+
 def show_tsp_bb():
-    st.header("TSP (Traveling Salesman Problem) - Branch and Bound")
+    st.header("Traveling Salesman Problem - Branch and Bound")
     st.markdown("""
-    Solve TSP using Branch and Bound algorithm. The algorithm explores the solution 
-    space systematically, using cost matrix reduction to calculate lower bounds and 
-    prune suboptimal paths.
+    Create your custom graph by specifying edges and weights for each city.
+    Format: (destination,weight) (destination,weight) ...
+    Example for City 2: (3,32) (5,7) (1,14) means:
+    - Edge from City 2 to City 3 with cost 32
+    - Edge from City 2 to City 5 with cost 7
+    - Edge from City 2 to City 1 with cost 14
     """)
     
-    # Initialize session state for step-by-step
-    if 'tsp_step' not in st.session_state:
-        st.session_state.tsp_step = 0
-    if 'tsp_auto_run' not in st.session_state:
-        st.session_state.tsp_auto_run = False
-    if 'tsp_nodes' not in st.session_state:
-        st.session_state.tsp_nodes = []
-    if 'tsp_best_path' not in st.session_state:
-        st.session_state.tsp_best_path = None
-    if 'tsp_best_cost' not in st.session_state:
-        st.session_state.tsp_best_cost = float('inf')
+    # Input for number of cities
+    n_cities = st.number_input("Number of Cities", min_value=2, max_value=10, value=4)
     
-    st.subheader("Input Parameters")
-    col1, col2 = st.columns(2)
+    # Directed/Undirected toggle
+    is_directed = st.toggle("Directed Graph", value=False)
     
-    with col1:
-        num_cities = st.number_input("Number of Cities", min_value=3, max_value=8, value=5)
-        random_seed = st.number_input("Random Seed", value=42)
+    # Edge inputs for each city
+    st.subheader("Edge Inputs")
+    edge_inputs = []
+    cols = st.columns(2)
+    for i in range(n_cities):
+        with cols[i % 2]:
+            edge_input = st.text_input(
+                f"City {i+1} edges", 
+                help=f"Enter edges from city {i+1} as (dest,weight) pairs",
+                key=f"city_{i}"
+            )
+            edge_inputs.append(parse_edge_input(edge_input))
     
-    with col2:
-        st.write("**City Coordinates**")
-        use_random = st.checkbox("Use Random Cities", value=True)
-    
-    if use_random:
-        np.random.seed(int(random_seed))
-        cities = [(np.random.rand() * 100, np.random.rand() * 100) for _ in range(num_cities)]
-    else:
-        cities = []
-        st.write("Enter coordinates manually:")
-        for i in range(num_cities):
-            col_x, col_y = st.columns(2)
-            with col_x:
-                x = st.number_input(f"City {i} X", value=i*20, key=f"x{i}")
-            with col_y:
-                y = st.number_input(f"City {i} Y", value=i*15, key=f"y{i}")
-            cities.append((x, y))
-    
-    # Calculate distance matrix
-    cost_matrix = calculate_distance_matrix(cities)
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("Run Algorithm", type="primary"):
-            st.session_state.tsp_step = 0
-            st.session_state.tsp_auto_run = False
-            best_path, best_cost, nodes = tsp_branch_bound(cities, cost_matrix)
-            st.session_state.tsp_nodes = nodes
-            st.session_state.tsp_best_path = best_path
-            st.session_state.tsp_best_cost = best_cost
-            st.session_state.tsp_step = len(nodes)
-            st.rerun()
-    
-    with col2:
-        if st.button("Next Step") and st.session_state.tsp_nodes:
-            if st.session_state.tsp_step < len(st.session_state.tsp_nodes):
-                st.session_state.tsp_step += 1
-                st.rerun()
-    
-    with col3:
-        if st.button("Auto Run") and st.session_state.tsp_nodes:
-            st.session_state.tsp_auto_run = True
-            st.rerun()
-    
-    if st.session_state.tsp_nodes:
-        nodes_to_show = st.session_state.tsp_nodes[:st.session_state.tsp_step]
+    if st.button("Process and Solve", type="primary"):
+        # Create initial cost matrix
+        cost_matrix = create_cost_matrix(n_cities, edge_inputs, is_directed)
         
-        if st.session_state.tsp_step > 0:
-            current_node = st.session_state.tsp_nodes[st.session_state.tsp_step - 1]
-            
-            st.subheader("Current Step Information")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Level", current_node.level)
-            with col2:
-                st.metric("Path", str(current_node.path))
-            with col3:
-                st.metric("Bound", f"{current_node.bound:.2f}")
-            
-            if st.session_state.tsp_best_path:
-                st.success(f"Best Path Found: {st.session_state.tsp_best_path}")
-                st.success(f"Best Cost: {st.session_state.tsp_best_cost:.2f}")
+        # Show initial matrix
+        st.subheader("Initial Cost Matrix")
+        initial_df = pd.DataFrame(
+            cost_matrix,
+            index=[f"City {i+1}" for i in range(n_cities)],
+            columns=[f"City {i+1}" for i in range(n_cities)]
+        )
+        initial_df = initial_df.replace(np.inf, '∞')
+        st.dataframe(initial_df)
         
-        # Visualization: Tree
-        st.subheader("Branch and Bound Tree")
-        if len(nodes_to_show) > 0:
-            fig = visualize_tsp_tree(nodes_to_show)
+        # Row Reduction Step
+        st.subheader("Row Reduction")
+        reduced_matrix = cost_matrix.copy()
+        row_reductions = []
+        
+        for i in range(n_cities):
+            row = reduced_matrix[i]
+            valid_values = row[row != np.inf]
+            if len(valid_values) > 0:
+                row_min = np.min(valid_values)
+                if row_min != np.inf and row_min > 0:
+                    reduced_matrix[i] = np.where(reduced_matrix[i] != np.inf, 
+                                              reduced_matrix[i] - row_min, np.inf)
+                    row_reductions.append((i, row_min))
+        
+        # Show row reduction details
+        for i, reduction in row_reductions:
+            st.write(f"Row {i+1}: subtract {reduction:.2f}")
+        
+        row_reduced_df = pd.DataFrame(
+            reduced_matrix,
+            index=[f"City {i+1}" for i in range(n_cities)],
+            columns=[f"City {i+1}" for i in range(n_cities)]
+        )
+        row_reduced_df = row_reduced_df.replace(np.inf, '∞')
+        st.dataframe(row_reduced_df)
+        
+        # Column Reduction Step
+        st.subheader("Column Reduction")
+        col_reductions = []
+        
+        for j in range(n_cities):
+            col = reduced_matrix[:, j]
+            valid_values = col[col != np.inf]
+            if len(valid_values) > 0:
+                col_min = np.min(valid_values)
+                if col_min != np.inf and col_min > 0:
+                    reduced_matrix[:, j] = np.where(reduced_matrix[:, j] != np.inf, 
+                                                 reduced_matrix[:, j] - col_min, np.inf)
+                    col_reductions.append((j, col_min))
+        
+        # Show column reduction details
+        for j, reduction in col_reductions:
+            st.write(f"Column {j+1}: subtract {reduction:.2f}")
+        
+        final_reduced_df = pd.DataFrame(
+            reduced_matrix,
+            index=[f"City {i+1}" for i in range(n_cities)],
+            columns=[f"City {i+1}" for i in range(n_cities)]
+        )
+        final_reduced_df = final_reduced_df.replace(np.inf, '∞')
+        st.dataframe(final_reduced_df)
+        
+        # Calculate initial lower bound
+        initial_bound = sum(red for _, red in row_reductions) + sum(red for _, red in col_reductions)
+        st.success(f"Initial Lower Bound = {initial_bound:.2f}")
+        
+        # Solve TSP using Branch and Bound
+        best_path, best_cost, nodes_explored = tsp_branch_bound(range(n_cities), cost_matrix)
+        
+        if best_path:
+            st.success(f"Optimal Solution Found!")
+            path_cities = [i+1 for i in best_path]
+            st.write(f"Path: {' → '.join(map(str, path_cities))}")
+            st.write(f"Total Cost: {best_cost:.2f}")
+            
+            # Visualize the solution
+            st.subheader("Solution Visualization")
+            G = nx.DiGraph() if is_directed else nx.Graph()
+            
+            # Add nodes and edges
+            for i in range(n_cities):
+                G.add_node(i+1)
+                for dest, weight in edge_inputs[i]:
+                    G.add_edge(i+1, dest, weight=weight)
+            
+            # Draw solution
+            fig, ax = plt.subplots(figsize=(10, 8))
+            pos = nx.spring_layout(G)
+            
+            # Draw original graph in light gray
+            nx.draw(G, pos, with_labels=True, node_color='lightgray',
+                   edge_color='lightgray', node_size=500)
+            
+            # Draw solution path in red
+            path_edges = list(zip(path_cities[:-1], path_cities[1:]))
+            solution_graph = nx.DiGraph() if is_directed else nx.Graph()
+            solution_graph.add_edges_from(path_edges)
+            nx.draw_networkx_edges(solution_graph, pos, edge_color='red',
+                                 width=2)
+            
             st.pyplot(fig)
-        
-        # Visualization: Cost Matrix Reduction
-        if st.session_state.tsp_step > 0:
-            st.subheader("Cost Matrix (Current Node)")
-            current_node = st.session_state.tsp_nodes[st.session_state.tsp_step - 1]
             
-            # Display cost matrix
-            matrix_df = pd.DataFrame(current_node.cost_matrix)
-            matrix_df.index = [f"City {i}" for i in range(len(cities))]
-            matrix_df.columns = [f"City {i}" for i in range(len(cities))]
-            st.dataframe(matrix_df, use_container_width=True)
-        
-        # Final path visualization
-        if st.session_state.tsp_best_path:
-            st.subheader("Optimal Path")
-            fig = visualize_tsp_path(cities, st.session_state.tsp_best_path, 
-                                    st.session_state.tsp_best_cost, 
-                                    "Optimal TSP Solution")
-            st.pyplot(fig)
-        
-        # Show pruning statistics
-        if len(nodes_to_show) > 0:
-            pruned_count = sum(1 for n in nodes_to_show if n.pruned)
-            st.subheader("Statistics")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Nodes Explored", len(nodes_to_show))
-            with col2:
-                st.metric("Nodes Pruned", pruned_count)
-            with col3:
-                st.metric("Nodes Remaining", len(nodes_to_show) - pruned_count)
+            # Show Branch and Bound tree
+            st.subheader("Branch and Bound Tree")
+            tree_fig = visualize_tsp_tree(nodes_explored)
+            st.pyplot(tree_fig)
+        else:
+            st.error("No valid solution found! Graph may be disconnected.")
+
+# Add to requirements.txt:
+# networkx
+# matplotlib
+# numpy
+# pandas
 

@@ -1,159 +1,147 @@
 import streamlit as st
+import networkx as nx
 import matplotlib.pyplot as plt
+from itertools import permutations
 import numpy as np
 import pandas as pd
 import random
-from itertools import permutations
 
-def calculate_distance(p1, p2):
-    """Calculate Euclidean distance between two points"""
-    return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+def parse_edge_input(input_str):
+    """Parse edge input string into list of (destination, weight) tuples"""
+    if not input_str.strip():
+        return []
+    edges = []
+    pairs = input_str.strip().split()
+    for pair in pairs:
+        if not pair.startswith('(') or not pair.endswith(')'):
+            continue
+        try:
+            dest, weight = pair[1:-1].split(',')
+            edges.append((int(dest), float(weight)))
+        except:
+            continue
+    return edges
 
-def tsp_brute_force(cities):
-    """Brute force TSP solution (for small n)"""
-    n = len(cities)
-    if n > 8:
-        return None, None  # Too slow for large n
+def create_distance_matrix(n, edge_inputs, directed=False):
+    """Create distance matrix from edge inputs"""
+    matrix = np.full((n, n), float('inf'))
+    np.fill_diagonal(matrix, 0)
     
-    min_distance = float('inf')
-    best_path = None
+    for i in range(n):
+        edges = edge_inputs[i]
+        for dest, weight in edges:
+            if dest-1 != i:  # Skip self-loops
+                matrix[i][dest-1] = weight
+                if not directed:  # For undirected graphs
+                    matrix[dest-1][i] = weight
     
-    for perm in permutations(range(1, n)):  # Start from city 0
-        path = [0] + list(perm) + [0]
-        distance = sum(calculate_distance(cities[path[i]], cities[path[i+1]]) 
-                      for i in range(len(path) - 1))
-        
-        if distance < min_distance:
-            min_distance = distance
-            best_path = path
-    
-    return best_path, min_distance
-
-def tsp_nearest_neighbor(cities):
-    """Nearest Neighbor heuristic for TSP"""
-    n = len(cities)
-    unvisited = set(range(1, n))
-    path = [0]
-    current = 0
-    total_distance = 0
-    steps = []
-    
-    while unvisited:
-        nearest = min(unvisited, key=lambda x: calculate_distance(cities[current], cities[x]))
-        distance = calculate_distance(cities[current], cities[nearest])
-        total_distance += distance
-        path.append(nearest)
-        unvisited.remove(nearest)
-        steps.append({
-            'from': current,
-            'to': nearest,
-            'distance': distance,
-            'total': total_distance
-        })
-        current = nearest
-    
-    # Return to start
-    distance = calculate_distance(cities[current], cities[0])
-    total_distance += distance
-    path.append(0)
-    steps.append({
-        'from': current,
-        'to': 0,
-        'distance': distance,
-        'total': total_distance
-    })
-    
-    return path, total_distance, steps
-
-def visualize_tsp(cities, path, title="TSP Solution"):
-    """Visualize TSP path"""
-    fig, ax = plt.subplots(figsize=(10, 8))
-    
-    # Plot cities
-    x_coords = [c[0] for c in cities]
-    y_coords = [c[1] for c in cities]
-    ax.scatter(x_coords, y_coords, c='red', s=100, zorder=3)
-    
-    # Label cities
-    for i, (x, y) in enumerate(cities):
-        ax.annotate(f'City {i}', (x, y), xytext=(5, 5), textcoords='offset points')
-    
-    # Plot path
-    path_x = [cities[i][0] for i in path]
-    path_y = [cities[i][1] for i in path]
-    ax.plot(path_x, path_y, 'b-', linewidth=2, alpha=0.6, zorder=1)
-    ax.plot(path_x, path_y, 'bo', markersize=8, zorder=2)
-    
-    ax.set_xlabel('X Coordinate')
-    ax.set_ylabel('Y Coordinate')
-    ax.set_title(title)
-    ax.grid(True, alpha=0.3)
-    
-    return fig
+    return matrix
 
 def show_tsp():
-    st.header("Travelling Salesman Problem (TSP)")
+    st.header("Traveling Salesman Problem")
     st.markdown("""
-    The TSP finds the shortest route that visits each city exactly once and returns 
-    to the starting city. This is an NP-hard problem.
+    Create your custom graph by specifying edges and weights for each city.
+    Format: (destination,weight) (destination,weight) ...
+    Example: (2,10) (3,15) means edges to city 2 with weight 10 and city 3 with weight 15
     """)
     
-    st.subheader("Input Parameters")
-    method = st.radio("Select Method:", ["Nearest Neighbor (Heuristic)", "Brute Force (Exact, n≤8)"])
+    # Input for number of cities
+    n_cities = st.number_input("Number of Cities", min_value=2, max_value=10, value=4)
     
-    col1, col2 = st.columns(2)
+    # Directed/Undirected toggle
+    is_directed = st.toggle("Directed Graph", value=False)
     
-    with col1:
-        num_cities = st.number_input("Number of Cities", min_value=3, max_value=15, value=5)
-        random_seed = st.number_input("Random Seed", value=42)
+    # Edge inputs for each city
+    st.subheader("Edge Inputs")
+    edge_inputs = []
+    cols = st.columns(2)
+    for i in range(n_cities):
+        with cols[i % 2]:
+            edge_input = st.text_input(
+                f"City {i+1} edges", 
+                help=f"Enter edges from city {i+1} as (dest,weight) pairs",
+                key=f"city_{i}"
+            )
+            edge_inputs.append(parse_edge_input(edge_input))
     
-    with col2:
-        st.write("**City Coordinates**")
-        use_random = st.checkbox("Use Random Cities", value=True)
-    
-    if use_random:
-        np.random.seed(int(random_seed))
-        cities = [(np.random.rand() * 100, np.random.rand() * 100) for _ in range(num_cities)]
-    else:
-        cities = []
-        st.write("Enter coordinates manually:")
-        for i in range(num_cities):
-            col_x, col_y = st.columns(2)
-            with col_x:
-                x = st.number_input(f"City {i} X", value=i*20, key=f"x{i}")
-            with col_y:
-                y = st.number_input(f"City {i} Y", value=i*15, key=f"y{i}")
-            cities.append((x, y))
-    
-    if st.button("Run Algorithm", type="primary"):
-        if method == "Nearest Neighbor (Heuristic)":
-            path, distance, steps = tsp_nearest_neighbor(cities)
-            st.success(f"Total Distance: {distance:.2f}")
-            st.write(f"Path: {' → '.join([f'City {i}' for i in path])}")
-            
-            # Visualization
-            fig = visualize_tsp(cities, path, f"TSP Solution (Nearest Neighbor) - Distance: {distance:.2f}")
-            st.pyplot(fig)
-            
-            # Show steps
-            with st.expander("View Algorithm Steps"):
-                steps_df = pd.DataFrame(steps)
-                st.dataframe(steps_df, use_container_width=True)
+    # Create and solve button
+    if st.button("Create and Solve TSP", type="primary"):
+        # Create distance matrix
+        dist_matrix = create_distance_matrix(n_cities, edge_inputs, is_directed)
         
-        else:  # Brute Force
-            if num_cities > 8:
-                st.warning("Brute force is too slow for more than 8 cities. Using Nearest Neighbor instead.")
-                path, distance, steps = tsp_nearest_neighbor(cities)
+        # Visualize graph
+        st.subheader("Graph Visualization")
+        G = nx.DiGraph() if is_directed else nx.Graph()
+        
+        # Add nodes and edges
+        for i in range(n_cities):
+            G.add_node(i+1)
+            for dest, weight in edge_inputs[i]:
+                G.add_edge(i+1, dest, weight=weight)
+        
+        # Draw graph
+        fig, ax = plt.subplots(figsize=(10, 8))
+        pos = nx.spring_layout(G)
+        nx.draw(G, pos, with_labels=True, node_color='lightblue', 
+                node_size=500, font_size=16, font_weight='bold')
+        
+        # Draw edge labels
+        edge_labels = nx.get_edge_attributes(G, 'weight')
+        nx.draw_networkx_edge_labels(G, pos, edge_labels)
+        
+        st.pyplot(fig)
+        
+        # Show distance matrix
+        st.subheader("Distance Matrix")
+        st.dataframe(pd.DataFrame(
+            dist_matrix,
+            index=[f"City {i+1}" for i in range(n_cities)],
+            columns=[f"City {i+1}" for i in range(n_cities)]
+        ))
+        
+        # Solve TSP
+        if not is_directed:
+            # For undirected graphs
+            cities = list(range(n_cities))
+            best_path = None
+            min_cost = float('inf')
+            
+            for path in permutations(cities[1:]):
+                path = (0,) + path + (0,)
+                cost = sum(dist_matrix[path[i]][path[i+1]] 
+                          for i in range(len(path)-1))
+                if cost < min_cost:
+                    min_cost = cost
+                    best_path = path
+            
+            if min_cost != float('inf'):
+                st.success("Solution Found!")
+                path_cities = [i+1 for i in best_path]
+                st.write(f"Optimal Path: {' → '.join(map(str, path_cities))}")
+                st.write(f"Total Cost: {min_cost:.2f}")
+                
+                # Visualize solution path
+                st.subheader("Solution Path Visualization")
+                fig, ax = plt.subplots(figsize=(10, 8))
+                
+                # Draw original graph in light gray
+                nx.draw(G, pos, with_labels=True, node_color='lightgray',
+                       edge_color='lightgray', node_size=500)
+                
+                # Draw solution path in bold red
+                path_edges = list(zip(path_cities[:-1], path_cities[1:]))
+                solution_graph = nx.Graph()
+                solution_graph.add_edges_from(path_edges)
+                nx.draw_networkx_edges(solution_graph, pos, edge_color='red',
+                                     width=2)
+                
+                st.pyplot(fig)
             else:
-                path, distance = tsp_brute_force(cities)
-                if path is None:
-                    st.error("Error computing solution!")
-                    return
-            
-            st.success(f"Optimal Distance: {distance:.2f}")
-            st.write(f"Path: {' → '.join([f'City {i}' for i in path])}")
-            
-            # Visualization
-            fig = visualize_tsp(cities, path, f"TSP Optimal Solution - Distance: {distance:.2f}")
-            st.pyplot(fig)
+                st.error("No valid solution found! Graph may be disconnected.")
+        else:
+            st.warning("TSP solution visualization for directed graphs coming soon!")
+
+# Add to requirements.txt:
+# networkx
+# matplotlib
 

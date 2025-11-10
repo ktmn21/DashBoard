@@ -70,6 +70,31 @@ def coin_change_dp_exact(d, N):
     
     return m[n-1, N], m, steps
 
+def reconstruct_coin_selection(table, coins, amount):
+    """
+    Reconstructs which coins were used to make the amount from the DP table
+    Args:
+        table: The DP table with minimum coins needed
+        coins: List of available coin denominations
+        amount: Target amount
+    Returns:
+        List of coins used in the optimal solution
+    """
+    selected_coins = []
+    i = len(table) - 1  # Start from last row
+    j = amount  # Start from target amount
+    
+    while j > 0:
+        if i > 0 and table[i][j] == table[i-1][j]:
+            # If current value is same as value above, move up
+            i -= 1
+        else:
+            # Include current coin and reduce amount
+            selected_coins.append(coins[i])
+            j -= coins[i]
+    
+    return selected_coins
+
 def show_coin_change():
     st.header("Coin Changing (Dynamic Programming)")
     st.markdown("""
@@ -113,7 +138,7 @@ def show_coin_change():
         return m[n,N]
         """)
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("Run Algorithm", type="primary"):
             try:
@@ -141,6 +166,14 @@ def show_coin_change():
             st.session_state.coin_auto_run = True
             st.rerun()
     
+    with col4:
+        if st.button("Finish") and st.session_state.coin_table is not None:
+            # Set step to final step
+            st.session_state.coin_step = len(st.session_state.coin_steps)
+            # Stop auto-run if it's running
+            st.session_state.coin_auto_run = False
+            st.rerun()
+    
     if st.session_state.coin_table is not None:
         table = st.session_state.coin_table
         n, N = table.shape
@@ -165,6 +198,46 @@ def show_coin_change():
                 st.error("Cannot make the amount with given coins!")
             else:
                 st.success(f"✅ Algorithm Complete! Minimum coins needed: {int(min_coins)}")
+                
+                # Fix: Use table instead of current_table
+                selected_coins = reconstruct_coin_selection(table, d, N)
+                
+                # Show the selected coins with nice formatting
+                st.subheader("Selected Coins")
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    st.metric("Total Coins Used", len(selected_coins))
+                with col2:
+                    coin_counts = {}
+                    for coin in selected_coins:
+                        coin_counts[coin] = coin_counts.get(coin, 0) + 1
+                    
+                    coins_str = ", ".join([f"{count} × {coin}¢" for coin, count 
+                                         in sorted(coin_counts.items())])
+                    st.info(f"Coins Used: {coins_str}")
+                
+                # Visual representation of coins
+                st.write("Visual representation:")
+                cols = st.columns(len(selected_coins))
+                for idx, coin in enumerate(sorted(selected_coins)):
+                    with cols[idx]:
+                        st.markdown(f"""
+                            <div style='
+                                width: 50px;
+                                height: 50px;
+                                border-radius: 25px;
+                                background: gold;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                margin: auto;
+                                font-weight: bold;
+                                color: darkblue;
+                                border: 2px solid darkgoldenrod;
+                            '>
+                                {coin}¢
+                            </div>
+                        """, unsafe_allow_html=True)
         
         # Show table with step-by-step updates
         st.subheader(f"DP Table (Step {current_step}/{total_steps})")
@@ -393,14 +466,14 @@ def show_coin_change():
                         with col3:
                             st.metric("Result", f"min = {int(current_step_info['value']) if current_step_info['value'] != float('inf') else '∞'}")
                     else:
-                        formula = f"m[{current_step_info['i']}, {step_j}] = m[{current_step_info['i']-1}, {step_j}] = {above_val_str}"
+                        formula = f"m[{current_step_info['i']}, {step_j}] = m[{current_stepInfo['i']-1}, {step_j}] = {above_val_str}"
                         st.code(formula, language='text')
                         
                         col1, col2 = st.columns(2)
                         with col1:
-                            st.metric("Copy from above", f"m[{current_step_info['i']-1}, {step_j}] = {above_val_str}")
+                            st.metric("Copy from above", f"m[{current_stepInfo['i']-1}, {step_j}] = {above_val_str}")
                         with col2:
-                            st.metric("Result", f"m[{current_step_info['i']}, {step_j}] = {above_val_str}")
+                            st.metric("Result", f"m[{current_stepInfo['i']}, {step_j}] = {above_val_str}")
             
             # Show metrics
             col1, col2, col3 = st.columns(3)
