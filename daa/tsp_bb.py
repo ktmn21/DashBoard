@@ -1,469 +1,413 @@
 import streamlit as st
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import networkx as nx
-from collections import deque
-import time
+import graphviz
+from copy import deepcopy
+from math import inf
 
-def calculate_distance_matrix(cities):
-    """Calculate distance matrix for cities"""
-    n = len(cities)
-    dist_matrix = np.zeros((n, n))
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                dist_matrix[i][j] = np.sqrt((cities[i][0] - cities[j][0])**2 + 
-                                           (cities[i][1] - cities[j][1])**2)
-    return dist_matrix
+# -----------------------
+# Helper data structures
+# -----------------------
+def _new_node_id(state):
+    nid = state.get("tsp_next_id", 0)
+    state["tsp_next_id"] = nid + 1
+    return nid
 
+# -----------------------
+# Helper functions
+# -----------------------
 def reduce_matrix(matrix):
-    """Reduce matrix and return reduction cost"""
-    n = len(matrix)
-    cost = 0
-    reduced = matrix.copy()
-    
-    # Reduce rows
-    for i in range(n):
-        row = reduced[i]
-        valid_values = row[row != np.inf]
-        if len(valid_values) > 0:
-            row_min = np.min(valid_values)
-            if row_min != np.inf and row_min > 0:
-                cost += row_min
-                reduced[i] = np.where(reduced[i] != np.inf, reduced[i] - row_min, np.inf)
-    
-    # Reduce columns
-    for j in range(n):
-        col = reduced[:, j]
-        valid_values = col[col != np.inf]
-        if len(valid_values) > 0:
-            col_min = np.min(valid_values)
-            if col_min != np.inf and col_min > 0:
-                cost += col_min
-                reduced[:, j] = np.where(reduced[:, j] != np.inf, 
-                                        reduced[:, j] - col_min, np.inf)
-    
-    return reduced, cost
+    """
+    Reduce matrix: subtract row minima then column minima.
+    Returns (reduced_matrix, reduction_cost, row_mins, col_mins).
+    """
+    m = matrix.astype(float).copy()
+    n = m.shape[0]
+    row_mins = np.zeros(n)
+    col_mins = np.zeros(n)
 
-def calculate_bound(matrix, path):
-    """Calculate lower bound for current path"""
-    n = len(matrix)
-    temp_matrix = matrix.copy()
-    
-    # Set visited rows and columns to infinity
-    if len(path) > 0:
-        for i in range(len(path) - 1):
-            temp_matrix[path[i], :] = np.inf
-            temp_matrix[:, path[i+1]] = np.inf
-        temp_matrix[path[-1], path[0]] = np.inf
-    
-    reduced, cost = reduce_matrix(temp_matrix)
-    return cost
-
-class TSPNode:
-    def __init__(self, level, path, bound, cost_matrix):
-        self.level = level
-        self.path = path
-        self.bound = bound
-        self.cost_matrix = cost_matrix
-        self.pruned = False
-
-def tsp_branch_bound(cities, cost_matrix):
-    """Solve TSP using Branch and Bound with step visualization"""
-    n = len(cities)
-    nodes_explored = []
-    best_cost = float('inf')
-    best_path = None
-    step = 1
-    
-    # Initialize root node
-    initial_matrix = cost_matrix.copy()
-    st.write("# Branch and Bound Steps")
-    
-    # Root node reduction
-    st.write("## Root Node")
-    initial_bound = show_node_reductions(initial_matrix, [], step)
-    root = TSPNode(0, [0], initial_bound, initial_matrix)
-    
-    queue = deque([root])
-    nodes_explored.append(root)
-    
-    # Show initial tree
-    st.write(f"### Tree after Step {step}")
-    tree_fig = visualize_tsp_tree(nodes_explored)
-    st.pyplot(tree_fig)
-    
-    while queue:
-        current = queue.popleft()
-        step += 1
-        
-        if current.bound >= best_cost:
-            current.pruned = True
-            st.write(f"## Step {step}: Pruning node with path {current.path}")
-            st.write(f"Bound ({current.bound:.2f}) ≥ Best cost ({best_cost:.2f})")
-            continue
-        
-        if current.level == n - 1:
-            # Complete path found
-            total_cost = sum(cost_matrix[current.path[i]][current.path[i+1]] 
-                           for i in range(len(current.path) - 1))
-            total_cost += cost_matrix[current.path[-1]][current.path[0]]
-            
-            if total_cost < best_cost:
-                best_cost = total_cost
-                best_path = current.path + [current.path[0]]
-                st.write(f"## Step {step}: New best solution found!")
-                st.write(f"Path: {best_path}")
-                st.write(f"Cost: {best_cost:.2f}")
-            continue
-        
-        # Generate children
-        st.write(f"## Step {step}: Expanding node with path {current.path}")
-        for next_city in range(n):
-            if next_city not in current.path:
-                new_path = current.path + [next_city]
-                new_matrix = current.cost_matrix.copy()
-                
-                # Show matrix reductions for this node
-                new_bound = current.bound + show_node_reductions(new_matrix, new_path, step)
-                
-                if new_bound < best_cost:
-                    child = TSPNode(current.level + 1, new_path, new_bound, new_matrix)
-                    queue.append(child)
-                    nodes_explored.append(child)
-                    st.write(f"Added node with path {new_path} and bound {new_bound:.2f}")
-                else:
-                    st.write(f"Pruned node with path {new_path} (bound {new_bound:.2f} ≥ {best_cost:.2f})")
-        
-        # Show updated tree
-        st.write(f"### Tree after Step {step}")
-        tree_fig = visualize_tsp_tree(nodes_explored)
-        st.pyplot(tree_fig)
-    
-    return best_path, best_cost, nodes_explored
-
-def visualize_tsp_tree(nodes_explored, max_nodes=30):
-    """Visualize branch and bound tree"""
-    G = nx.DiGraph()
-    
-    nodes_to_show = nodes_explored[:max_nodes]
-    
-    for i, node in enumerate(nodes_to_show):
-        label = f"L{node.level}\nP:{node.path}\nB:{node.bound:.1f}"
-        if node.pruned:
-            label += "\n[PRUNED]"
-        G.add_node(i, label=label, level=node.level, bound=node.bound, 
-                   path=str(node.path), pruned=node.pruned)
-        
-        # Connect to parent
-        if i > 0:
-            parent_idx = max([j for j in range(i) if nodes_to_show[j].level < node.level], 
-                           default=0)
-            G.add_edge(parent_idx, i)
-    
-    fig, ax = plt.subplots(figsize=(16, 10))
-    pos = nx.spring_layout(G, k=3, iterations=50)
-    
-    # Color nodes
-    node_colors = ['red' if G.nodes[i]['pruned'] else 'lightblue' for i in G.nodes()]
-    nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=800, ax=ax)
-    nx.draw_networkx_edges(G, pos, alpha=0.3, arrows=True, arrowsize=15, ax=ax)
-    
-    # Labels
-    labels = {i: G.nodes[i]['label'] for i in G.nodes()}
-    nx.draw_networkx_labels(G, pos, labels, font_size=7, ax=ax)
-    
-    ax.set_title("Branch and Bound Exploration Tree\n(L=Level, P=Path, B=Bound)", 
-                fontsize=14, weight='bold')
-    ax.axis('off')
-    
-    return fig
-
-def visualize_tsp_path(cities, path, cost, title="TSP Solution"):
-    """Visualize TSP path"""
-    fig, ax = plt.subplots(figsize=(10, 8))
-    
-    x_coords = [c[0] for c in cities]
-    y_coords = [c[1] for c in cities]
-    ax.scatter(x_coords, y_coords, c='red', s=200, zorder=3)
-    
-    for i, (x, y) in enumerate(cities):
-        ax.annotate(f'City {i}', (x, y), xytext=(5, 5), textcoords='offset points', 
-                   fontsize=10, weight='bold')
-    
-    path_x = [cities[i][0] for i in path]
-    path_y = [cities[i][1] for i in path]
-    ax.plot(path_x, path_y, 'b-', linewidth=2, alpha=0.7, zorder=1)
-    ax.plot(path_x, path_y, 'bo', markersize=10, zorder=2)
-    
-    ax.set_xlabel('X Coordinate', fontsize=12)
-    ax.set_ylabel('Y Coordinate', fontsize=12)
-    ax.set_title(f'{title}\nTotal Distance: {cost:.2f}', fontsize=14, weight='bold')
-    ax.grid(True, alpha=0.3)
-    
-    return fig
-
-def parse_edge_input(input_str):
-    """Parse edge input string into list of (destination, weight) tuples"""
-    if not input_str.strip():
-        return []
-    edges = []
-    pairs = input_str.strip().split()
-    for pair in pairs:
-        if not pair.startswith('(') or not pair.endswith(')'):
-            continue
-        try:
-            dest, weight = pair[1:-1].split(',')
-            edges.append((int(dest), float(weight)))
-        except:
-            continue
-    return edges
-
-def create_cost_matrix(n, edge_inputs, directed=False):
-    """Create cost matrix from edge inputs"""
-    matrix = np.full((n, n), np.inf)
-    np.fill_diagonal(matrix, 0)
-    
-    for i in range(n):
-        edges = edge_inputs[i]
-        for dest, weight in edges:
-            if dest-1 != i:  # Skip self-loops
-                matrix[i][dest-1] = weight
-                if not directed:  # For undirected graphs
-                    matrix[dest-1][i] = weight
-    return matrix
-
-def show_reduction_step(matrix, step_type, reduction_values):
-    """Show matrix reduction step"""
-    df = pd.DataFrame(matrix)
-    df = df.replace(np.inf, '∞')
-    
-    if step_type == "row":
-        st.write("Row Reduction:")
-        for i, val in enumerate(reduction_values):
-            if val > 0:
-                st.write(f"Row {i+1}: subtract {val:.2f}")
-    else:
-        st.write("Column Reduction:")
-        for i, val in enumerate(reduction_values):
-            if val > 0:
-                st.write(f"Column {i+1}: subtract {val:.2f}")
-    
-    st.dataframe(df)
-    return df
-
-# Add new function to show matrix reductions for each node
-def show_node_reductions(matrix, current_path, step_number):
-    """Show row and column reductions for current node"""
-    st.write(f"### Step {step_number}: Node with Path {current_path}")
-    
-    # Copy matrix and set visited paths to infinity
-    temp_matrix = matrix.copy()
-    if len(current_path) > 0:
-        for i in range(len(current_path) - 1):
-            temp_matrix[current_path[i], :] = np.inf
-            temp_matrix[:, current_path[i+1]] = np.inf
-        if len(current_path) > 1:
-            temp_matrix[current_path[-1], current_path[0]] = np.inf
-    
-    # Show initial matrix
-    st.write("Initial Matrix:")
-    initial_df = pd.DataFrame(temp_matrix)
-    initial_df = initial_df.replace(np.inf, '∞')
-    st.dataframe(initial_df)
-    
     # Row reduction
-    row_reductions = []
-    for i in range(len(matrix)):
-        row = temp_matrix[i]
-        valid_values = row[row != np.inf]
-        if len(valid_values) > 0:
-            row_min = np.min(valid_values)
-            if row_min != np.inf and row_min > 0:
-                temp_matrix[i] = np.where(temp_matrix[i] != np.inf, 
-                                        temp_matrix[i] - row_min, np.inf)
-                row_reductions.append((i, row_min))
-    
-    if row_reductions:
-        st.write("After Row Reduction:")
-        for i, red in row_reductions:
-            st.write(f"Row {i+1}: subtract {red:.2f}")
-        row_df = pd.DataFrame(temp_matrix)
-        row_df = row_df.replace(np.inf, '∞')
-        st.dataframe(row_df)
-    
+    for i in range(n):
+        valid = m[i][m[i] != np.inf]
+        if valid.size > 0:
+            rmin = valid.min()
+            if rmin != np.inf and rmin > 0:
+                row_mins[i] = rmin
+                m[i] = np.where(m[i] != np.inf, m[i] - rmin, np.inf)
+
     # Column reduction
-    col_reductions = []
-    for j in range(len(matrix)):
-        col = temp_matrix[:, j]
-        valid_values = col[col != np.inf]
-        if len(valid_values) > 0:
-            col_min = np.min(valid_values)
-            if col_min != np.inf and col_min > 0:
-                temp_matrix[:, j] = np.where(temp_matrix[:, j] != np.inf, 
-                                           temp_matrix[:, j] - col_min, np.inf)
-                col_reductions.append((j, col_min))
-    
-    if col_reductions:
-        st.write("After Column Reduction:")
-        for j, red in col_reductions:
-            st.write(f"Column {j+1}: subtract {red:.2f}")
-        final_df = pd.DataFrame(temp_matrix)
-        final_df = final_df.replace(np.inf, '∞')
-        st.dataframe(final_df)
-    
-    total_reduction = sum(r for _, r in row_reductions) + sum(r for _, r in col_reductions)
-    st.write(f"Total Reduction Cost: {total_reduction:.2f}")
-    return total_reduction
+    for j in range(n):
+        valid = m[:, j][m[:, j] != np.inf]
+        if valid.size > 0:
+            cmin = valid.min()
+            if cmin != np.inf and cmin > 0:
+                col_mins[j] = cmin
+                m[:, j] = np.where(m[:, j] != np.inf, m[:, j] - cmin, np.inf)
+
+    total_cost = row_mins.sum() + col_mins.sum()
+    return m, total_cost, row_mins, col_mins
+
+def branch_node(node, distance_matrix, state):
+    """
+    Expand `node` (dict) into child nodes using branch-and-bound rules.
+    Each child is a dict with keys: id, parent, path, level, bound, matrix, status.
+    """
+    children = []
+    n = distance_matrix.shape[0]
+    current = node["path"][-1]
+    for next_city in range(n):
+        if next_city in node["path"]:
+            continue
+        # edge cost from original matrix
+        edge_cost = distance_matrix[current, next_city]
+        if edge_cost == np.inf:
+            # unreachable
+            continue
+        # Build child matrix: copy node matrix, set row current and col next_city to inf
+        temp = node["matrix"].copy()
+        temp[current, :] = np.inf
+        temp[:, next_city] = np.inf
+        # forbid returning directly to start prematurely
+        temp[next_city, node["path"][0]] = np.inf
+        reduced, red_cost, row_mins, col_mins = reduce_matrix(temp)
+        child_bound = node["bound"] + edge_cost + red_cost
+        child = {
+            "id": _new_node_id(state),
+            "parent": node["id"],
+            "path": node["path"] + [next_city],
+            "level": node["level"] + 1,
+            "bound": child_bound,
+            "matrix": reduced,
+            "orig_matrix": temp,  # prior to reduction (for display)
+            "row_mins": row_mins,
+            "col_mins": col_mins,
+            "edge_cost": edge_cost,
+            "status": "waiting"  # waiting/active/pruned/explored/solution
+        }
+        children.append(child)
+    return children
+
+def draw_tree(nodes):
+    """
+    Build a Graphviz dot object for the current node list.
+    Color convention:
+      - current (active) -> green
+      - pruned -> red
+      - waiting/frontier -> blue
+      - explored -> gray
+      - solution -> gold
+    """
+    dot = graphviz.Digraph(format="png")
+    for node in nodes:
+        nid = str(node["id"])
+        label = f'{ "→".join(str(x) for x in node["path"]) }\\nLB={node["bound"]:.1f}'
+        color = "lightblue"
+        if node["status"] == "active":
+            color = "green"
+        elif node["status"] == "pruned":
+            color = "red"
+        elif node["status"] == "waiting":
+            color = "deepskyblue"
+        elif node["status"] == "explored":
+            color = "gray"
+        elif node["status"] == "solution":
+            color = "gold"
+        dot.node(nid, label=label, style="filled", fillcolor=color)
+        if node["parent"] is not None:
+            dot.edge(str(node["parent"]), nid)
+    return dot
+
+# -----------------------
+# UI & algorithm control
+# -----------------------
+def _reset_state():
+    st.session_state["tsp_initialized"] = False
+    st.session_state["tsp_nodes"] = []
+    st.session_state["tsp_frontier"] = []
+    st.session_state["tsp_best_cost"] = np.inf
+    st.session_state["tsp_best_path"] = None
+    st.session_state["tsp_next_id"] = 0
+    st.session_state["tsp_step"] = 0
+    # last expansion info
+    st.session_state.pop("tsp_last_children", None)
+    st.session_state.pop("tsp_last_level_min", None)
+    st.session_state.pop("tsp_last_expanded", None)
 
 def show_tsp_bb():
-    st.header("Traveling Salesman Problem - Branch and Bound")
-    st.markdown("""
-    Create your custom graph by specifying edges and weights for each city.
-    Format: (destination,weight) (destination,weight) ...
-    Example for City 2: (3,32) (5,7) (1,14) means:
-    - Edge from City 2 to City 3 with cost 32
-    - Edge from City 2 to City 5 with cost 7
-    - Edge from City 2 to City 1 with cost 14
-    """)
-    
-    # Input for number of cities
-    n_cities = st.number_input("Number of Cities", min_value=2, max_value=10, value=4)
-    
-    # Directed/Undirected toggle
-    is_directed = st.toggle("Directed Graph", value=False)
-    
-    # Edge inputs for each city
-    st.subheader("Edge Inputs")
-    edge_inputs = []
-    cols = st.columns(2)
-    for i in range(n_cities):
-        with cols[i % 2]:
-            edge_input = st.text_input(
-                f"City {i+1} edges", 
-                help=f"Enter edges from city {i+1} as (dest,weight) pairs",
-                key=f"city_{i}"
-            )
-            edge_inputs.append(parse_edge_input(edge_input))
-    
-    if st.button("Process and Solve", type="primary"):
-        # Create initial cost matrix
-        cost_matrix = create_cost_matrix(n_cities, edge_inputs, is_directed)
-        
-        # Show initial matrix
-        st.subheader("Initial Cost Matrix")
-        initial_df = pd.DataFrame(
-            cost_matrix,
-            index=[f"City {i+1}" for i in range(n_cities)],
-            columns=[f"City {i+1}" for i in range(n_cities)]
-        )
-        initial_df = initial_df.replace(np.inf, '∞')
-        st.dataframe(initial_df)
-        
-        # Row Reduction Step
-        st.subheader("Row Reduction")
-        reduced_matrix = cost_matrix.copy()
-        row_reductions = []
-        
-        for i in range(n_cities):
-            row = reduced_matrix[i]
-            valid_values = row[row != np.inf]
-            if len(valid_values) > 0:
-                row_min = np.min(valid_values)
-                if row_min != np.inf and row_min > 0:
-                    reduced_matrix[i] = np.where(reduced_matrix[i] != np.inf, 
-                                              reduced_matrix[i] - row_min, np.inf)
-                    row_reductions.append((i, row_min))
-        
-        # Show row reduction details
-        for i, reduction in row_reductions:
-            st.write(f"Row {i+1}: subtract {reduction:.2f}")
-        
-        row_reduced_df = pd.DataFrame(
-            reduced_matrix,
-            index=[f"City {i+1}" for i in range(n_cities)],
-            columns=[f"City {i+1}" for i in range(n_cities)]
-        )
-        row_reduced_df = row_reduced_df.replace(np.inf, '∞')
-        st.dataframe(row_reduced_df)
-        
-        # Column Reduction Step
-        st.subheader("Column Reduction")
-        col_reductions = []
-        
-        for j in range(n_cities):
-            col = reduced_matrix[:, j]
-            valid_values = col[col != np.inf]
-            if len(valid_values) > 0:
-                col_min = np.min(valid_values)
-                if col_min != np.inf and col_min > 0:
-                    reduced_matrix[:, j] = np.where(reduced_matrix[:, j] != np.inf, 
-                                                 reduced_matrix[:, j] - col_min, np.inf)
-                    col_reductions.append((j, col_min))
-        
-        # Show column reduction details
-        for j, reduction in col_reductions:
-            st.write(f"Column {j+1}: subtract {reduction:.2f}")
-        
-        final_reduced_df = pd.DataFrame(
-            reduced_matrix,
-            index=[f"City {i+1}" for i in range(n_cities)],
-            columns=[f"City {i+1}" for i in range(n_cities)]
-        )
-        final_reduced_df = final_reduced_df.replace(np.inf, '∞')
-        st.dataframe(final_reduced_df)
-        
-        # Calculate initial lower bound
-        initial_bound = sum(red for _, red in row_reductions) + sum(red for _, red in col_reductions)
-        st.success(f"Initial Lower Bound = {initial_bound:.2f}")
-        
-        # Solve TSP using Branch and Bound
-        best_path, best_cost, nodes_explored = tsp_branch_bound(range(n_cities), cost_matrix)
-        
-        if best_path:
-            st.success(f"Optimal Solution Found!")
-            path_cities = [i+1 for i in best_path]
-            st.write(f"Path: {' → '.join(map(str, path_cities))}")
-            st.write(f"Total Cost: {best_cost:.2f}")
-            
-            # Visualize the solution
-            st.subheader("Solution Visualization")
-            G = nx.DiGraph() if is_directed else nx.Graph()
-            
-            # Add nodes and edges
-            for i in range(n_cities):
-                G.add_node(i+1)
-                for dest, weight in edge_inputs[i]:
-                    G.add_edge(i+1, dest, weight=weight)
-            
-            # Draw solution
-            fig, ax = plt.subplots(figsize=(10, 8))
-            pos = nx.spring_layout(G)
-            
-            # Draw original graph in light gray
-            nx.draw(G, pos, with_labels=True, node_color='lightgray',
-                   edge_color='lightgray', node_size=500)
-            
-            # Draw solution path in red
-            path_edges = list(zip(path_cities[:-1], path_cities[1:]))
-            solution_graph = nx.DiGraph() if is_directed else nx.Graph()
-            solution_graph.add_edges_from(path_edges)
-            nx.draw_networkx_edges(solution_graph, pos, edge_color='red',
-                                 width=2)
-            
-            st.pyplot(fig)
-            
-            # Show Branch and Bound tree
-            st.subheader("Branch and Bound Tree")
-            tree_fig = visualize_tsp_tree(nodes_explored)
-            st.pyplot(tree_fig)
-        else:
-            st.error("No valid solution found! Graph may be disconnected.")
+    st.title("TSP - Branch and Bound (step-by-step)")
 
-# Add to requirements.txt:
-# networkx
-# matplotlib
-# numpy
-# pandas
+    # ----- Input Section -----
+    st.header("A) Input")
+    col_left, col_right = st.columns([2, 1])
+    with col_left:
+        st.write("Provide a distance matrix (use ∞ for no edge or leave blank).")
+        uploaded = st.file_uploader("Upload CSV (optional)", type=["csv"])
+        if uploaded is not None:
+            df = pd.read_csv(uploaded, header=None)
+            distance_matrix = df.replace(["∞", "inf", "INF"], np.inf).astype(float).values
+            st.session_state["tsp_distance_matrix"] = distance_matrix
+            st.session_state["tsp_n"] = distance_matrix.shape[0]
+        else:
+            # editable matrix input
+            n = st.number_input("Matrix size n (cities)", min_value=2, max_value=12, value=4, key="tsp_n_input")
+            if "tsp_distance_matrix" not in st.session_state or st.session_state.get("tsp_n", None) != n:
+                # initialize default matrix
+                default = np.full((n, n), np.inf)
+                np.fill_diagonal(default, 0.0)
+                st.session_state["tsp_distance_matrix"] = default
+                st.session_state["tsp_n"] = n
+            # present data editor
+            df_edit = pd.DataFrame(
+                st.session_state["tsp_distance_matrix"]
+            )
+            edited = st.data_editor(df_edit, num_rows="fixed", use_container_width=True, key="tsp_data_editor")
+            # convert blanks or non-numeric to inf
+            def _to_float_or_inf(x):
+                try:
+                    if pd.isna(x): return np.inf
+                    return float(x)
+                except:
+                    return np.inf
+            distance_matrix = edited.applymap(_to_float_or_inf).values
+            st.session_state["tsp_distance_matrix"] = distance_matrix
+            st.session_state["tsp_n"] = distance_matrix.shape[0]
+
+    with col_right:
+        st.write("Options")
+        directed = st.checkbox("Directed graph (asymmetric)", value=False, key="tsp_directed")
+        prune_level_enabled = st.checkbox("Prune non-minimal children on each level", value=False, key="tsp_prune_level")
+        st.write("Controls")
+        if st.button("Initialize / Restart"):
+            _reset_state()
+            # prepare root
+            distance_matrix = st.session_state["tsp_distance_matrix"].astype(float)
+            n = distance_matrix.shape[0]
+            # root reduction on original matrix
+            root_reduced, red_cost, row_mins, col_mins = reduce_matrix(distance_matrix.copy())
+            root = {
+                "id": _new_node_id(st.session_state),
+                "parent": None,
+                "path": [0],
+                "level": 0,
+                "bound": red_cost,
+                "matrix": root_reduced,
+                "orig_matrix": distance_matrix.copy(),
+                "row_mins": row_mins,
+                "col_mins": col_mins,
+                "status": "waiting"
+            }
+            st.session_state["tsp_nodes"] = [root]
+            st.session_state["tsp_frontier"] = [root["id"]]
+            st.session_state["tsp_distance_matrix"] = distance_matrix
+            st.session_state["tsp_n"] = n
+            st.session_state["tsp_initialized"] = True
+            st.session_state["tsp_step"] = 0
+            st.success("Initialized root node.")
+
+    # show current matrix
+    st.subheader("Distance Matrix")
+    if "tsp_distance_matrix" in st.session_state:
+        disp = pd.DataFrame(st.session_state["tsp_distance_matrix"])
+        disp = disp.replace(np.inf, "∞")
+        st.dataframe(disp)
+
+    # ----- Controls for stepping -----
+    st.header("Interactivity")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("Next Step"):
+            if not st.session_state.get("tsp_initialized", False):
+                st.error("Initialize first.")
+            else:
+                _perform_next_step()
+    with col2:
+        if st.button("Finish (run to end)"):
+            if not st.session_state.get("tsp_initialized", False):
+                st.error("Initialize first.")
+            else:
+                # auto-run until done
+                while _perform_next_step(auto=True):
+                    pass
+
+    with col3:
+        if st.button("Clear / Reset"):
+            _reset_state()
+            st.experimental_rerun()
+
+    # ----- Tree Visualization Section -----
+    st.header("B) Tree Visualization")
+    nodes = st.session_state.get("tsp_nodes", [])
+    if nodes:
+        dot = draw_tree(nodes)
+        st.graphviz_chart(dot)
+
+    # ----- Reduction Table Section -----
+    st.header("C) Reduction Tables (current expansion)")
+    cur_node = None
+    # current node is the one with status 'active' or, if none, the next frontier minimal bound
+    for n in st.session_state.get("tsp_nodes", []):
+        if n["status"] == "active":
+            cur_node = n
+            break
+    if cur_node is None:
+        # pick minimal frontier for display only
+        frontier_ids = st.session_state.get("tsp_frontier", [])
+        frontier_nodes = [nd for nd in st.session_state.get("tsp_nodes", []) if nd["id"] in frontier_ids and nd["status"] != "pruned"]
+        if frontier_nodes:
+            cur_node = min(frontier_nodes, key=lambda x: x["bound"])
+    if cur_node:
+        st.write(f"Showing reductions for node id={cur_node['id']} path: {'→'.join(map(str, cur_node['path']))}")
+        # original (with infinities applied for path)
+        orig = cur_node.get("orig_matrix", cur_node["matrix"].copy())
+        # show three columns: original(with infinities), after row reduction, after full reduction
+        colA, colB, colC = st.columns(3)
+        with colA:
+            st.write("Original (masked) matrix")
+            st.table(pd.DataFrame(orig).replace(np.inf, "∞"))
+        # row reduced: apply row subtraction only
+        temp = orig.copy()
+        row_mins = np.zeros(temp.shape[0])
+        for i in range(temp.shape[0]):
+            valid = temp[i][temp[i] != np.inf]
+            if valid.size > 0:
+                rmin = valid.min()
+                row_mins[i] = rmin
+                if rmin != np.inf and rmin > 0:
+                    temp[i] = np.where(temp[i] != np.inf, temp[i] - rmin, np.inf)
+        with colB:
+            st.write("After Row Reduction")
+            st.table(pd.DataFrame(temp).replace(np.inf, "∞"))
+            st.write("Row minima:", [float(x) for x in row_mins])
+        # column reduction on top of row-reduced
+        final = temp.copy()
+        col_mins = np.zeros(final.shape[0])
+        for j in range(final.shape[0]):
+            valid = final[:, j][final[:, j] != np.inf]
+            if valid.size > 0:
+                cmin = valid.min()
+                col_mins[j] = cmin
+                if cmin != np.inf and cmin > 0:
+                    final[:, j] = np.where(final[:, j] != np.inf, final[:, j] - cmin, np.inf)
+        with colC:
+            st.write("After Column Reduction")
+            st.table(pd.DataFrame(final).replace(np.inf, "∞"))
+            st.write("Column minima:", [float(x) for x in col_mins])
+        lb = row_mins.sum() + col_mins.sum()
+        st.write(f"Computed lower bound contribution from reductions: **{lb:.2f}**")
+
+        # If we just expanded this node, show child bounds and level-min info
+        last_expanded = st.session_state.get("tsp_last_expanded")
+        if last_expanded == cur_node["id"]:
+            last_children = st.session_state.get("tsp_last_children", [])
+            if last_children:
+                st.write("Children created in last expansion (path → bound → status):")
+                for ch in last_children:
+                    st.write(f"{'→'.join(map(str,ch['path']))}  —  LB={ch['bound']:.2f}  —  {ch['status']}")
+                level_min = st.session_state.get("tsp_last_level_min", None)
+                if level_min is not None:
+                    st.info(f"Minimum LB at this level (rsl) = {level_min:.2f}")
+
+    # ----- Final Output Section -----
+    st.header("Final Output")
+    if st.session_state.get("tsp_best_path") is not None:
+        st.success("Optimal tour found!")
+        st.metric("Optimal Cost", f"{st.session_state['tsp_best_cost']:.2f}")
+        st.metric("Total Nodes Explored", len(st.session_state.get("tsp_nodes", [])))
+        pruned = sum(1 for nd in st.session_state.get("tsp_nodes", []) if nd["status"] == "pruned")
+        st.metric("Pruned Nodes", pruned)
+        st.write("Optimal Path:", " → ".join(str(x) for x in st.session_state["tsp_best_path"]))
+
+# -----------------------
+# Core step function
+# -----------------------
+def _perform_next_step(auto=False):
+    """
+    Perform a single branch-and-bound expansion step.
+    Returns True if there are more steps to process (used by Finish loop).
+    """
+    state = st.session_state
+    nodes = state.get("tsp_nodes", [])
+    if not nodes:
+        return False
+
+    # pick frontier nodes (waiting) with smallest bound
+    frontier_ids = state.get("tsp_frontier", [])
+    frontier_nodes = [nd for nd in nodes if nd["id"] in frontier_ids and nd["status"] != "pruned"]
+    if not frontier_nodes:
+        # no frontier: finish
+        return False
+
+    # choose node with minimum bound
+    current = min(frontier_nodes, key=lambda x: x["bound"])
+    # mark active
+    for nd in nodes:
+        if nd["status"] == "active":
+            nd["status"] = "explored"
+    current["status"] = "active"
+    state["tsp_step"] = state.get("tsp_step", 0) + 1
+
+    # If node level = n-1, it's a complete path (except return to start)
+    n = state["tsp_n"]
+    orig_matrix = state["tsp_distance_matrix"]
+    if current["level"] == n - 1:
+        # form full tour and compute cost using original matrix
+        path = current["path"] + [current["path"][0]]
+        total_cost = 0.0
+        feasible = True
+        for i in range(len(path) - 1):
+            c = orig_matrix[path[i], path[i+1]]
+            if c == np.inf:
+                feasible = False
+                break
+            total_cost += c
+        if feasible and total_cost < state.get("tsp_best_cost", np.inf):
+            state["tsp_best_cost"] = total_cost
+            state["tsp_best_path"] = path
+            current["status"] = "solution"
+        else:
+            current["status"] = "explored"
+        # remove from frontier
+        state["tsp_frontier"] = [fid for fid in frontier_ids if fid != current["id"]]
+        return len(state.get("tsp_frontier", [])) > 0
+
+    # Otherwise expand current
+    children = branch_node(current, orig_matrix, state)
+
+    # compute level minimum (rsl) among children (bound includes edge + reductions)
+    if children:
+        level_min = min(ch["bound"] for ch in children)
+    else:
+        level_min = None
+
+    # store last expansion info for UI display
+    state["tsp_last_expanded"] = current["id"]
+    state["tsp_last_level_min"] = level_min
+    state["tsp_last_children"] = [{"path": ch["path"], "bound": ch["bound"], "status": ch["status"]} for ch in children]
+
+    # add children: apply pruning rules
+    prune_level_enabled = state.get("tsp_prune_level", False)
+    for ch in children:
+        # prune if worse than current best known solution
+        if ch["bound"] >= state.get("tsp_best_cost", np.inf):
+            ch["status"] = "pruned"
+        else:
+            # optional additional pruning: prune children on this level that are not minimal
+            if prune_level_enabled and (level_min is not None) and (ch["bound"] > level_min):
+                ch["status"] = "pruned"
+            else:
+                ch["status"] = "waiting"
+                state.setdefault("tsp_frontier", []).append(ch["id"])
+        nodes.append(ch)
+
+    # mark current explored and remove from frontier
+    current["status"] = "explored"
+    state["tsp_frontier"] = [fid for fid in state.get("tsp_frontier", []) if fid != current["id"]]
+
+    # update lists
+    state["tsp_nodes"] = nodes
+
+    # when auto is True, allow small progress without hanging UI
+    if auto:
+        return True
+    return len(state.get("tsp_frontier", [])) > 0
 
